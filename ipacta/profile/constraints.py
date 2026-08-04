@@ -134,7 +134,23 @@ class KeyConstraint(Constraint):
         Args:
             keyType: Required key type (RSA, EC, DSA)
             keyParameters: Comma-separated list of allowed key sizes/curves
+            **kwargs: May use alternative allowedKeys.ALG.STRENGTH syntax
         """
+        self.allowed_keys = self._parse_allowed_keys(kwargs)
+
+        has_legacy = (
+            (keyType is not None and str(keyType).strip() != "")
+            or (
+                keyParameters is not None
+                and str(keyParameters).strip() != ""
+            )
+        )
+        if self.allowed_keys and has_legacy:
+            raise ValueError(
+                "Invalid configuration: cannot mix allowedKeys with "
+                "keyType/keyParameters"
+            )
+
         self.key_type = (keyType or "RSA").upper()
         self.key_parameters = []
 
@@ -147,8 +163,117 @@ class KeyConstraint(Constraint):
                     # Might be EC curve name
                     self.key_parameters.append(param.strip())
 
+    @staticmethod
+    def _parse_allowed_keys(kwargs: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
+        """Parse Dogtag allowedKeys.ALG.STRENGTH parameters from kwargs."""
+        result: Dict[str, Dict[str, str]] = {}
+        prefix = "allowedKeys."
+        for key, value in kwargs.items():
+            if not key.startswith(prefix):
+                continue
+            leaf = key[len(prefix):]
+            parts = leaf.split(".", 1)
+            if len(parts) != 2 or not parts[0] or not parts[1]:
+                raise ValueError(
+                    f"Invalid allowedKeys parameter: {key}"
+                )
+            alg = parts[0].upper().replace("-", "")
+            if alg not in ("RSA", "EC", "DSA", "MLDSA", "MLKEM"):
+                raise ValueError(
+                    f"Invalid allowedKeys algorithm: {parts[0]}"
+                )
+            result.setdefault(alg, {})[parts[1]] = str(value).strip()
+        return result
+
+    def _is_allowed_key_strength(self, alg: str, strength: str) -> bool:
+        """Check allowedKeys map (Dogtag isAllowedKeyStrengthForAlgorithm)."""
+        overrides = self.allowed_keys.get(alg)
+        if not overrides:
+            return False
+
+        specific = overrides.get(strength)
+        if specific is None and alg == "EC":
+            # Profiles use nistp*; cryptography reports secp*r1
+            _ec_aliases = {
+                "secp256r1": "nistp256",
+                "secp384r1": "nistp384",
+                "secp521r1": "nistp521",
+            }
+            alias = _ec_aliases.get(strength.lower())
+            if alias:
+                specific = overrides.get(alias)
+
+        all_val = overrides.get("ALL")
+        if specific is not None and specific.lower() == "false":
+            return False
+        if specific is not None and specific.lower() == "true":
+            return True
+        if all_val is not None and all_val.lower() == "true":
+            return True
+        return False
+
+    def _validate_allowed_keys(self, csr) -> List[str]:
+        """Validate CSR key against allowedKeys.* configuration."""
+        errors = []
+        public_key = csr.public_key()
+
+        if isinstance(public_key, rsa.RSAPublicKey):
+            alg, strength = "RSA", str(public_key.key_size)
+        elif isinstance(public_key, ec.EllipticCurvePublicKey):
+            alg, strength = "EC", public_key.curve.name
+        elif isinstance(public_key, dsa.DSAPublicKey):
+            alg, strength = "DSA", str(public_key.key_size)
+        else:
+            try:
+                from cryptography.hazmat.primitives.asymmetric import (
+                    mldsa,
+                )
+                if isinstance(public_key, mldsa.MLDSA44PublicKey):
+                    alg, strength = "MLDSA", "44"
+                elif isinstance(public_key, mldsa.MLDSA65PublicKey):
+                    alg, strength = "MLDSA", "65"
+                elif isinstance(public_key, mldsa.MLDSA87PublicKey):
+                    alg, strength = "MLDSA", "87"
+                else:
+                    return [
+                        f"Unsupported key type: "
+                        f"{type(public_key).__name__}"
+                    ]
+            except ImportError:
+                return [
+                    f"Unsupported key type: "
+                    f"{type(public_key).__name__}"
+                ]
+
+        if not self._is_allowed_key_strength(alg, strength):
+            errors.append(
+                f"{alg} key parameter '{strength}' not allowed by "
+                f"allowedKeys"
+            )
+            return errors
+
+        if alg == "RSA":
+            allowed_exponents_str = ipacta.get_config_value(
+                "ca", "allowed_rsa_exponents", default="65537"
+            )
+            allowed_exponents = [
+                int(e.strip())
+                for e in allowed_exponents_str.split(",")
+            ]
+            if public_key.public_numbers().e not in allowed_exponents:
+                errors.append(
+                    f"RSA exponent {public_key.public_numbers().e} "
+                    f"not allowed. "
+                    f"Allowed exponents: {allowed_exponents}"
+                )
+
+        return errors
+
     def validate(self, csr, context: dict) -> List[str]:
         """Validate key type and size"""
+        if self.allowed_keys:
+            return self._validate_allowed_keys(csr)
+
         errors = []
         public_key = csr.public_key()
 
