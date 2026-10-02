@@ -1,0 +1,38 @@
+summary: CA basic smoke — IPACTA (IPA-hosted, no Dogtag)
+description: |
+  Parity counterpart to dogtagpki/pki plans/ca-basic-smoke.fmf
+  (GHA ca-basic-test.yml smoke subset).
+
+  Backend: IPACTA via ipa-server-install --internal-ca (IPAthinCA).
+  Same intent as Dogtag pkispawn smoke: CA up, list profiles/certs
+  (via IPA/Dogtag-compatible API), teardown.
+
+  See tests/tmt/ca-basic-smoke/README.md
+discover:
+    how: fmf
+    test:
+        - /tests/tmt/ca-basic-smoke
+provision:
+    how: local
+prepare:
+    how: shell
+    script:
+      - |
+        command -v docker >/dev/null \
+          || { echo "ERROR: docker required for ca-basic-smoke"; exit 1; }
+execute:
+    how: tmt
+finish:
+    how: shell
+    script:
+      - |
+        docker rm -f ipa 2>/dev/null || true
+        docker network rm example 2>/dev/null || true
+tag:
+    - ca
+    - ipacta
+    - idm-8254
+    - tier1
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/ca-basic-test.yml

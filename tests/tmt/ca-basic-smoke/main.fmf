@@ -1,0 +1,17 @@
+summary: Install IPA+IPACTA, verify CA, uninstall
+description: |
+  IPACTA-hosted smoke matching pki tests/tmt/ca-basic-smoke:
+  - container with IPA packages (or prebuilt image)
+  - ipa-server-install --internal-ca
+  - kinit + ipa ping; cert/profile visibility
+  - uninstall
+test: ./test.sh
+framework: shell
+require: []
+duration: 90m
+tag:
+    - ca
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
