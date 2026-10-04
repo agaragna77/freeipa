@@ -1,0 +1,47 @@
+summary: Basic CA — IPACTA (FreeIPA-only)
+description: |
+  Full mapped parity with Dogtag TMT ca-basic-test
+  (pki branch idm-8254-tmt-ca-basic / GHA ca-basic-test.yml).
+  FreeIPA-only: one container, ipa-server-install --internal-ca.
+
+  Prepare builds freeipa-ipacta from Azure Dockerfile.build.fedora
+  (makerpms + dist/rpms), so a clean Testing Farm guest does not
+  need a preloaded image.
+
+  See tests/tmt/ca-basic-test/README.md
+discover:
+    how: fmf
+    test:
+        - /tests/tmt/ca-basic-test
+provision:
+    how: local
+prepare:
+    - name: require-docker
+      how: shell
+      script:
+        - |
+          command -v docker >/dev/null \
+            || { echo "ERROR: docker required for ca-basic-test"; exit 1; }
+    - name: build-ipa-runner
+      how: shell
+      script:
+        - |
+          # Mirrors ipatests/azure (makerpms + Dockerfile.build.fedora)
+          "${TMT_TREE}/tests/tmt/bin/build-ipa-runner.sh" "${TMT_TREE}"
+execute:
+    how: tmt
+finish:
+    how: shell
+    script:
+      - |
+        docker rm -f ipa 2>/dev/null || true
+        docker network rm example 2>/dev/null || true
+tag:
+    - ca
+    - ipacta
+    - idm-8254
+    - tier1
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/ca-basic-test.yml
+    - relates: https://github.com/freeipa/freeipa/blob/master/ipatests/azure/Dockerfiles/Dockerfile.build.fedora
