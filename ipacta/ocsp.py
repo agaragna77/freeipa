@@ -246,6 +246,19 @@ class OCSPResponder:
             key_data += f":{nonce.hex()}"
         return hashlib.sha256(key_data.encode()).hexdigest()
 
+    @staticmethod
+    def _as_x509_certificate(cert) -> x509.Certificate:
+        """Return a cryptography Certificate from IPA or cryptography certs."""
+        if isinstance(cert, x509.Certificate):
+            return cert
+        # ipalib.x509.IPACertificate wraps cryptography in .cert
+        inner = getattr(cert, "cert", None)
+        if isinstance(inner, x509.Certificate):
+            return inner
+        raise TypeError(
+            f"expected cryptography Certificate, got {type(cert).__name__}"
+        )
+
     def _get_cert_status(self, serial_number: int) -> Tuple[
         ocsp.OCSPCertStatus,
         Optional[datetime],
@@ -398,13 +411,16 @@ class OCSPResponder:
             builder = ocsp.OCSPResponseBuilder()
 
             # Use the actual certificate if available, fall back to CA cert
-            # for unknown certificates
-            resp_cert = certificate if certificate else self.ca.ca_cert
+            # for unknown certificates. Storage may return IPACertificate.
+            resp_cert = self._as_x509_certificate(
+                certificate if certificate else self.ca.ca_cert
+            )
+            issuer_cert = self._as_x509_certificate(self.ca.ca_cert)
 
             # Add certificate status
             builder = builder.add_response(
                 cert=resp_cert,
-                issuer=self.ca.ca_cert,
+                issuer=issuer_cert,
                 algorithm=ocsp_req.hash_algorithm,
                 cert_status=cert_status_obj,
                 this_update=this_update,
@@ -418,6 +434,11 @@ class OCSPResponder:
                 builder = builder.add_extension(
                     x509.OCSPNonce(nonce), critical=False
                 )
+
+            builder = builder.responder_id(
+                ocsp.OCSPResponderEncoding.HASH, self.ocsp_cert
+            )
+            builder = builder.certificates([self.ocsp_cert])
 
             # Sign the response with algorithm matching OCSP certificate
             # OCSP responses use the OCSP cert's algorithm
