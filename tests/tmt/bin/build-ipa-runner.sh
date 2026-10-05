@@ -12,19 +12,33 @@ if [[ -z "$REPO_ROOT" || ! -f "$REPO_ROOT/freeipa.spec.in" ]]; then
 fi
 cd "$REPO_ROOT"
 
-IPA_IMAGE="${IPA_IMAGE:-freeipa-ipacta:latest}"
 BASE_IMAGE="${BASE_IMAGE:-registry.fedoraproject.org/fedora-toolbox:44}"
 DOCKERFILE="${IPA_DOCKERFILE:-${REPO_ROOT}/ipatests/azure/Dockerfiles/Dockerfile.build.fedora}"
 COPR_REPO="${COPR_REPO:-@freeipa/freeipa-master}"
 
+command -v docker >/dev/null \
+    || { echo "ERROR: docker required to build freeipa-ipacta" >&2; exit 1; }
+
+# Testing Farm / Quay path: pull a prebuilt image and tag it as freeipa-ipacta.
+# Set IPA_IMAGE=quay.io/<ns>/freeipa-ipacta:<branch>-<short-sha> and SKIP_IPA_BUILD=1.
 if [[ "${SKIP_IPA_BUILD:-0}" == "1" ]]; then
-    echo "SKIP_IPA_BUILD=1 — not building (image must already exist)"
-    docker image inspect "$IPA_IMAGE" >/dev/null
+    if [[ -n "${IPA_IMAGE:-}" ]] \
+            && { [[ "$IPA_IMAGE" == */* ]] || [[ "$IPA_IMAGE" == quay.io* ]]; }; then
+        echo "SKIP_IPA_BUILD=1 — pulling ${IPA_IMAGE}"
+        docker pull "${IPA_IMAGE}"
+        docker tag "${IPA_IMAGE}" freeipa-ipacta
+        docker tag "${IPA_IMAGE}" freeipa-ipacta:latest
+    else
+        echo "SKIP_IPA_BUILD=1 — IPA_IMAGE unset/local; expecting local freeipa-ipacta"
+    fi
+    docker image inspect freeipa-ipacta >/dev/null \
+        || { echo "ERROR: freeipa-ipacta image not found (set IPA_IMAGE or build)" >&2; exit 1; }
+    echo "==== freeipa-ipacta image ready (skip build) ===="
+    docker images freeipa-ipacta
     exit 0
 fi
 
-command -v docker >/dev/null \
-    || { echo "ERROR: docker required to build ${IPA_IMAGE}" >&2; exit 1; }
+IPA_IMAGE="${IPA_IMAGE:-freeipa-ipacta:latest}"
 [[ -f "$DOCKERFILE" ]] \
     || { echo "ERROR: missing Dockerfile ${DOCKERFILE}" >&2; exit 1; }
 
