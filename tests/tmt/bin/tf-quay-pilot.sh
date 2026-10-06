@@ -1,20 +1,22 @@
 #!/bin/bash
-# Build freeipa-ipacta locally, push to Quay, then run the IDM-8254 TF pilot
-# (ca-basic-test) pulling the image.
+# Submit IDM-8254 IPACTA ca-basic-test to Testing Farm.
+#
+# Default: guest prepare builds freeipa-ipacta from Fedora 46 packages
+# (no Quay). Optional --quay path keeps build→push→pull for faster
+# re-runs or offline guests.
 #
 # Defaults (override via env or flags):
-#   QUAY_IMAGE=quay.io/agaragna77/freeipa-ipacta
-#   compose=Fedora-latest  parallel-limit=1  timeout=180
+#   compose=Fedora-Rawhide  parallel-limit=1  timeout=180
 #
-# Auth: QUAY_USER + QUAY_PASSWORD (from ~/.config/quay-pki-tmt.env robot),
-# else existing docker login to quay.io.
+# Auth (Quay path only): QUAY_USER + QUAY_PASSWORD from
+# ~/.config/quay-pki-tmt.env, else existing docker login.
 # TF: TESTING_FARM_API_TOKEN must be set. Public Quay → no TF pull secrets.
 #
 # Usage:
 #   tests/tmt/bin/tf-quay-pilot.sh
-#   tests/tmt/bin/tf-quay-pilot.sh --skip-build-if-present
 #   tests/tmt/bin/tf-quay-pilot.sh --wait
-#   tests/tmt/bin/tf-quay-pilot.sh --git-ref my-branch --no-push
+#   tests/tmt/bin/tf-quay-pilot.sh --quay --skip-build-if-present
+#   tests/tmt/bin/tf-quay-pilot.sh --git-ref my-branch
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -30,11 +32,13 @@ if [[ -f "${HOME}/.config/quay-pki-tmt.env" ]]; then
 fi
 
 QUAY_IMAGE="${_CALLER_QUAY_IMAGE:-quay.io/agaragna77/freeipa-ipacta}"
-COMPOSE="${TF_COMPOSE:-Fedora-latest}"
+# Public ranch has no Fedora-46 yet; Rawhide tracks F46. Guest only needs Docker.
+COMPOSE="${TF_COMPOSE:-Fedora-Rawhide}"
 PARALLEL_LIMIT="${TF_PARALLEL_LIMIT:-1}"
 TIMEOUT_MIN="${TF_TIMEOUT:-180}"
 GIT_URL="${TF_GIT_URL:-}"
 GIT_REF=""
+USE_QUAY=0
 SKIP_BUILD_IF_PRESENT=0
 DO_WAIT=0
 DO_PUSH=1
@@ -44,14 +48,16 @@ usage() {
     cat <<'EOF'
 Usage: tf-quay-pilot.sh [options]
 
-  --skip-build-if-present  Skip local build+push if Quay tag already exists
+  (default)                TF guest builds freeipa-ipacta from F46 packages
+  --quay                   Build/push Quay image; TF pulls via SKIP_IPA_BUILD
+  --skip-build-if-present  With --quay: skip build+push if Quay tag exists
   --skip-build             Alias for --skip-build-if-present
-  --no-push                Build locally but do not push (debug)
-  --no-build               Do not run build-ipa-runner.sh (image must exist)
+  --no-push                With --quay: build locally but do not push
+  --no-build               With --quay: do not run build-ipa-runner.sh
   --wait                   Wait for Testing Farm request completion
   --git-ref REF            Git ref/branch for TF (default: current branch)
   --git-url URL            Git URL for TF (default: origin → https)
-  --compose NAME           TF compose (default: Fedora-latest)
+  --compose NAME           TF compose (default: Fedora-Rawhide)
   --parallel-limit N       Max parallel plans (default: 1)
   --timeout MIN            TF timeout minutes (default: 180)
   --quay-image IMAGE       Quay repository (default: $QUAY_IMAGE or
@@ -62,6 +68,10 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --quay)
+            USE_QUAY=1
+            shift
+            ;;
         --skip-build-if-present|--skip-build)
             SKIP_BUILD_IF_PRESENT=1
             shift
@@ -100,6 +110,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --quay-image)
             QUAY_IMAGE="$2"
+            USE_QUAY=1
             shift 2
             ;;
         -h|--help)
@@ -114,8 +125,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-command -v docker >/dev/null \
-    || { echo "ERROR: docker required" >&2; exit 1; }
 command -v testing-farm >/dev/null \
     || { echo "ERROR: testing-farm CLI required (pipx install tft-cli)" >&2; exit 1; }
 [[ -n "${TESTING_FARM_API_TOKEN:-}" ]] \
@@ -123,7 +132,6 @@ command -v testing-farm >/dev/null \
 
 BRANCH_RAW=$(git rev-parse --abbrev-ref HEAD)
 SHORT_SHA=$(git rev-parse --short HEAD)
-# Tag: <branch-with-slashes-as-dashes>-<short-sha>
 BRANCH_TAG=$(printf '%s' "$BRANCH_RAW" | tr '/' '-')
 TAG="${BRANCH_TAG}-${SHORT_SHA}"
 FULL_IMAGE="${QUAY_IMAGE}:${TAG}"
@@ -138,26 +146,26 @@ if [[ -z "$GIT_URL" ]]; then
         echo "ERROR: cannot detect origin; pass --git-url" >&2
         exit 1
     fi
-    # git@github.com:user/repo.git → https://github.com/user/repo
     GIT_URL=$(printf '%s' "$ORIGIN" \
         | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')
 fi
 
-# Exact plan name (tmt plan ls regex).
 PLAN_REGEX='^/tests/tmt/plans/ca-basic-test$'
 
-echo "==== TF Quay pilot ===="
-echo "QUAY_IMAGE=${QUAY_IMAGE}"
-echo "TAG=${TAG}"
-echo "FULL_IMAGE=${FULL_IMAGE}"
+echo "==== TF IPACTA pilot ===="
+echo "MODE=$([ "$USE_QUAY" -eq 1 ] && echo quay || echo guest-f46-packages)"
 echo "GIT_URL=${GIT_URL}"
 echo "GIT_REF=${GIT_REF}"
 echo "COMPOSE=${COMPOSE}"
 echo "PARALLEL_LIMIT=${PARALLEL_LIMIT}"
 echo "TIMEOUT_MIN=${TIMEOUT_MIN}"
+if [[ "$USE_QUAY" -eq 1 ]]; then
+    echo "QUAY_IMAGE=${QUAY_IMAGE}"
+    echo "TAG=${TAG}"
+    echo "FULL_IMAGE=${FULL_IMAGE}"
+fi
 
 quay_tag_exists() {
-    # Anonymous HEAD works for public repos; 401/404 → missing or private.
     local url="https://quay.io/v2/${QUAY_IMAGE#quay.io/}/manifests/${TAG}"
     local code
     code=$(curl -sS -o /dev/null -w '%{http_code}' \
@@ -177,39 +185,43 @@ ensure_quay_login() {
         echo "==== using existing docker credentials for quay.io ===="
         return 0
     fi
-    # Best-effort: try a no-op that needs auth only on push.
     echo "NOTE: QUAY_USER/QUAY_PASSWORD unset; relying on existing docker login"
 }
 
-if [[ "$SKIP_BUILD_IF_PRESENT" -eq 1 ]] && quay_tag_exists; then
-    echo "==== Quay tag already present; skipping build+push ===="
-    DO_BUILD=0
-    DO_PUSH=0
-fi
+if [[ "$USE_QUAY" -eq 1 ]]; then
+    command -v docker >/dev/null \
+        || { echo "ERROR: docker required for --quay" >&2; exit 1; }
 
-if [[ "$DO_BUILD" -eq 1 ]]; then
-    echo "==== Building freeipa-ipacta locally ===="
-    unset SKIP_IPA_BUILD IPA_IMAGE
-    "${SCRIPT_DIR}/build-ipa-runner.sh" "$REPO_ROOT"
-fi
+    if [[ "$SKIP_BUILD_IF_PRESENT" -eq 1 ]] && quay_tag_exists; then
+        echo "==== Quay tag already present; skipping build+push ===="
+        DO_BUILD=0
+        DO_PUSH=0
+    fi
 
-if [[ "$DO_PUSH" -eq 1 ]]; then
-    docker image inspect freeipa-ipacta >/dev/null \
-        || { echo "ERROR: local freeipa-ipacta missing; build first" >&2; exit 1; }
-    ensure_quay_login
-    echo "==== Pushing ${FULL_IMAGE} ===="
-    docker tag freeipa-ipacta:latest "$FULL_IMAGE"
-    if ! docker push "$FULL_IMAGE"; then
-        echo "ERROR: docker push failed; aborting (no TF request)" >&2
+    if [[ "$DO_BUILD" -eq 1 ]]; then
+        echo "==== Building freeipa-ipacta locally (F46 packages) ===="
+        unset SKIP_IPA_BUILD
+        # Keep IPA_IMAGE for tagging if set; default freeipa-ipacta:latest.
+        "${SCRIPT_DIR}/build-ipa-runner.sh" "$REPO_ROOT"
+    fi
+
+    if [[ "$DO_PUSH" -eq 1 ]]; then
+        docker image inspect freeipa-ipacta >/dev/null \
+            || { echo "ERROR: local freeipa-ipacta missing; build first" >&2; exit 1; }
+        ensure_quay_login
+        echo "==== Pushing ${FULL_IMAGE} ===="
+        docker tag freeipa-ipacta:latest "$FULL_IMAGE"
+        if ! docker push "$FULL_IMAGE"; then
+            echo "ERROR: docker push failed; aborting (no TF request)" >&2
+            exit 1
+        fi
+    fi
+
+    echo "==== Verifying Quay tag is pullable ===="
+    if ! quay_tag_exists; then
+        echo "ERROR: ${FULL_IMAGE} not found on Quay after push; aborting" >&2
         exit 1
     fi
-fi
-
-# Confirm public pullability when we pushed (or skipped because present).
-echo "==== Verifying Quay tag is pullable ===="
-if ! quay_tag_exists; then
-    echo "ERROR: ${FULL_IMAGE} not found on Quay after push; aborting" >&2
-    exit 1
 fi
 
 TF_ARGS=(
@@ -220,8 +232,11 @@ TF_ARGS=(
     --plan "$PLAN_REGEX"
     --parallel-limit "$PARALLEL_LIMIT"
     --timeout "$TIMEOUT_MIN"
-    -e "SKIP_IPA_BUILD=1 IPA_IMAGE=${FULL_IMAGE}"
 )
+
+if [[ "$USE_QUAY" -eq 1 ]]; then
+    TF_ARGS+=(-e "SKIP_IPA_BUILD=1 IPA_IMAGE=${FULL_IMAGE}")
+fi
 
 if [[ "$DO_WAIT" -eq 0 ]]; then
     TF_ARGS+=(--no-wait)
@@ -230,4 +245,8 @@ fi
 echo "==== Submitting Testing Farm request ===="
 echo "testing-farm ${TF_ARGS[*]}"
 testing-farm "${TF_ARGS[@]}"
-echo "==== Submitted (image ${FULL_IMAGE}) ===="
+if [[ "$USE_QUAY" -eq 1 ]]; then
+    echo "==== Submitted (image ${FULL_IMAGE}) ===="
+else
+    echo "==== Submitted (guest prepare builds F46 packaged IPACTA) ===="
+fi

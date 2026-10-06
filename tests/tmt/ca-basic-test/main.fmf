@@ -1,11 +1,12 @@
 summary: Install FreeIPA+IPACTA CA and verify (ca-basic-test)
 description: |
   FreeIPA-only IPACTA parity for Dogtag ca-basic-test / GHA ca-basic-test.yml:
-  - single IPA container, ipa-server-install --internal-ca
+  - single IPA container, stock ipa-server-install + packaged forge IPACTA
+  - Dogtag drop-in (pkispawn/pki/pki-tomcatd@ → python -m ipacta.server)
   - mapped layout / NSS / REST / OCSP / LDAP o=ipaca / profiles / audit
   - ipa-healthcheck (baked into the prepare image)
-  - uninstall + residual checks (no pkidestroy)
-  - Dogtag-only Tomcat/pki-CLI/CSR/DS-sidecar steps omitted (documented in reports)
+  - uninstall + residual checks
+  - standalone Dogtag CSR/DS-sidecar steps omitted (documented in reports)
 test: ./test.sh
 framework: shell
 require: []
@@ -17,3 +18,4 @@ tag:
 link:
     - verifies: https://redhat.atlassian.net/browse/IDM-8254
     - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/ca-basic-test.yml
+    - relates: https://forge.fedoraproject.org/freeipa/ipacta

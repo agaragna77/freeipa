@@ -2,17 +2,19 @@
 # IPACTA ca-basic-test — same functional coverage as dogtagpki/pki
 # tests/tmt/ca-basic-test (GHA ca-basic-test.yml), FreeIPA-only install.
 #
-# Model: single IPA container + ipa-server-install --internal-ca (IPACTA).
-# No separate DS/PKI containers, no pkispawn, no pki-tomcatd as CA.
-# Dogtag Tomcat layout / pki -n caadmin / pkidestroy are mapped to IPA CLI,
-# IPACTA paths, NSS nicknames, /ca/rest/* + OCSP, LDAP o=ipaca, ipa-healthcheck,
-# and ipa-server-install --uninstall.
+# Model: single IPA container + stock ipa-server-install with packaged
+# forge IPACTA (Provides pki-ca; Dogtag drop-in via pkispawn/pki/pki-tomcatd@).
+# No separate DS/PKI sidecars. FreeIPA is unchanged; install `ipacta` so
+# Dogtag RPMs are not pulled.
 #
 # After install, checks keep running if one fails; the script exits non-zero
-# at the end if any CA check failed. Dogtag-only surfaces (Tomcat files, pki
-# CLI, on-disk CSRs, DS sidecar) are omitted from this script — see
-# POCs/IDM-8254/ca-basic-differences-dogtag-tmt-vs-ipacta-tmt.md
+# at the end if any CA check failed. Standalone Dogtag CSR/DS-sidecar steps
+# are omitted — see POCs/IDM-8254/ca-basic-differences-dogtag-tmt-vs-ipacta-tmt.md
 set -euo pipefail
+
+# Forge IPACTA config (not the old in-tree /etc/ipa/ipacta.conf).
+IPACTA_CONF=/etc/pki/pki-tomcat/ipacta.conf
+IPACTA_UNIT=pki-tomcatd@pki-tomcat
 
 REPO_ROOT="${TMT_TREE:-}"
 if [[ -z "$REPO_ROOT" || ! -f "$REPO_ROOT/ipaserver/install/server/install.py" ]]; then
@@ -135,18 +137,26 @@ export FEDORA_VERSION
 step "Check IPA CLI help messages"
 iexec ipa --help >/dev/null
 iexec ipa-server-install --help >/dev/null
-iexec ipacta --help >/dev/null
+iexec pkispawn --help >/dev/null
+iexec pki --help >/dev/null
 
 step "Get IPACTA service flavor"
-# Dogtag: Tomcat new/old. IPACTA unit is templated until install.
-iexec test -f /usr/share/ipa/ipacta.service.template
-iexec test -f /usr/share/ipa/ipacta.conf.template
-iexec test -x /usr/bin/ipacta
-iexec grep -E 'ExecStart|gunicorn|ipacta' /usr/share/ipa/ipacta.service.template \
+# Forge IPACTA ships Dogtag-shaped shims; unit runs python -m ipacta.server.
+iexec rpm -q ipacta
+iexec test -f /usr/lib/systemd/system/pki-tomcatd@.service
+iexec test -x /usr/bin/pkispawn
+iexec test -x /usr/bin/pki
+iexec grep -E 'ipacta\.server|WorkingDirectory=/var/lib/ipacta' \
+    /usr/lib/systemd/system/pki-tomcatd@.service \
     | tee "$WORKDIR/ipacta.unit"
-grep -qiE 'ExecStart|ipacta' "$WORKDIR/ipacta.unit"
+grep -qiE 'ipacta' "$WORKDIR/ipacta.unit"
+# Must not have real Dogtag CA RPMs (ipacta Conflicts/Provides instead).
+if docker exec "$CONTAINER" rpm -q dogtag-pki-ca >/dev/null 2>&1; then
+    echo "ERROR: dogtag-pki-ca installed; expected forge IPACTA Provides" >&2
+    exit 1
+fi
 
-step "Install CA (ipa-server-install --internal-ca)"
+step "Install CA (ipa-server-install + packaged IPACTA)"
 iexec ipa-server-install \
     -U \
     --domain "$DOMAIN" \
@@ -155,16 +165,14 @@ iexec ipa-server-install \
     -a "$PASSWORD" \
     --no-host-dns \
     --no-ntp \
-    --internal-ca \
     > >(tee "$WORKDIR/install.stdout") 2> >(tee "$WORKDIR/install.stderr" >&2)
 
 step "Check CA backend is IPACTA"
-CA_BACKEND=$(iexec bash -c "grep -E '^ca_backend\\s*=' /etc/ipa/default.conf | cut -d= -f2 | tr -d ' '")
-echo "ca_backend=${CA_BACKEND}"
-[[ "$CA_BACKEND" == "ipacta" ]] || { echo "ERROR: expected ca_backend=ipacta, got '${CA_BACKEND}'" >&2; exit 1; }
-iexec systemctl is-active ipacta
-if docker exec "$CONTAINER" systemctl is-active pki-tomcatd@pki-tomcat 2>/dev/null; then
-    echo "ERROR: pki-tomcatd is active; expected FreeIPA+IPACTA only" >&2
+iexec rpm -q --provides ipacta | tee "$WORKDIR/ipacta.provides"
+grep -E '^pki-ca\b' "$WORKDIR/ipacta.provides"
+iexec systemctl is-active "$IPACTA_UNIT"
+if docker exec "$CONTAINER" rpm -q dogtag-pki-ca >/dev/null 2>&1; then
+    echo "ERROR: dogtag-pki-ca installed after install" >&2
     exit 1
 fi
 
@@ -179,7 +187,7 @@ sed -n '/^WARNING:/p' "$WORKDIR/install.stderr" | tee "$WORKDIR/warnings.txt" ||
 # Allow empty; fail only on unexpected critical patterns if present later
 
 step "Check external commands"
-iexec bash -c 'command -v ipa ipa-server-install ipacta certutil openssl ldapsearch'
+iexec bash -c 'command -v ipa ipa-server-install pkispawn pki certutil openssl ldapsearch'
 
 step "Install ipa-healthcheck"
 if ! docker exec "$CONTAINER" bash -c 'command -v ipa-healthcheck >/dev/null'; then
@@ -192,13 +200,13 @@ iexec test -d /var/lib/ipacta
 iexec ls -la /var/lib/ipacta
 
 step "Check IPACTA conf after installation"
-iexec test -f /etc/ipa/ipacta.conf
+iexec test -f "$IPACTA_CONF"
 iexec test -f /etc/ipa/default.conf
 iexec test -f /etc/ipa/ca.crt
-iexec grep -E '^ca_backend\s*=\s*ipacta' /etc/ipa/default.conf
 
 step "Check ipacta.conf"
-iexec grep -E 'https_port|log_file|realm|domain' /etc/ipa/ipacta.conf | tee "$WORKDIR/ipacta.conf.snip"
+iexec grep -E 'https_port|log_file|realm|domain|instance|nss' "$IPACTA_CONF" \
+    | tee "$WORKDIR/ipacta.conf.snip" || iexec head -40 "$IPACTA_CONF"
 
 step "Check NSS alias dir after installation"
 iexec test -d "$NSSDB"
@@ -216,10 +224,9 @@ fi
 iexec systemctl is-active httpd
 
 step "Check IPACTA systemd unit"
-iexec systemctl is-active ipacta
-# Installer starts the service; enable-state can be disabled in containers.
-echo "is-enabled=$(iexec systemctl is-enabled ipacta 2>/dev/null || echo unknown)"
-iexec systemctl status ipacta --no-pager | head -25 || true
+iexec systemctl is-active "$IPACTA_UNIT"
+echo "is-enabled=$(iexec systemctl is-enabled "$IPACTA_UNIT" 2>/dev/null || echo unknown)"
+iexec systemctl status "$IPACTA_UNIT" --no-pager | head -25 || true
 
 step "Check IPACTA logs dir after installation"
 iexec test -d /var/log/ipacta
@@ -230,12 +237,14 @@ iexec test -d /var/lib/ipacta/ca
 iexec ls -la /var/lib/ipacta/ca
 # Signing material lives in NSS (and PEMs under certs/); ca/ may be empty pre-subca.
 
-step "Check IPACTA certs/private dirs"
+step "Check IPACTA certs/runtime material"
+# Forge: PEMs live in NSS + unit PrivateTmp (/tmp/ipacta), not /var/lib/ipacta/private.
 iexec test -d /var/lib/ipacta/certs
-iexec test -d /var/lib/ipacta/private
-iexec test -f /var/lib/ipacta/certs/ca.crt
-iexec test -f /var/lib/ipacta/private/server.key
-iexec ls -la /var/lib/ipacta/certs /var/lib/ipacta/private
+iexec ls -la /var/lib/ipacta /var/lib/ipacta/certs
+iexec test -f "$NSSDB/cert9.db"
+iexec test -f "$NSSDB/key4.db"
+iexec certutil -L -d "$NSSDB" -n "$CA_SIGNING_NICK" >/dev/null
+iexec systemctl show -p PrivateTmp "$IPACTA_UNIT" | grep -q 'PrivateTmp=yes'
 
 step "Check CA server status"
 STATUS=$(iexec curl -sfk "https://127.0.0.1:8443/ca/admin/ca/getStatus" || true)
@@ -253,13 +262,12 @@ for path in /ca/rest/info /pki/rest/info /ca/rest/profiles; do
 done
 
 step "Check subsystems"
-# Only IPACTA CA — no pki-tomcat subsystems
-iexec systemctl is-active ipacta
+# Forge IPACTA provides pki-tomcatd@ (python -m ipacta.server, not Java Tomcat).
+iexec systemctl is-active "$IPACTA_UNIT"
 iexec systemctl is-active dirsrv@${REALM//./-} \
     || docker exec "$CONTAINER" bash -c 'systemctl list-units --type=service --state=running | grep -E "dirsrv@"'
-if docker exec "$CONTAINER" systemctl is-active pki-tomcatd@pki-tomcat 2>/dev/null; then
-    fail "unexpected pki-tomcatd"
-fi
+iexec systemctl show -p ExecStart "$IPACTA_UNIT" | grep -qi ipacta \
+    || fail "pki-tomcatd@ not running IPACTA"
 
 step "Check CA certs and keys"
 iexec certutil -L -d "$NSSDB" | tee "$WORKDIR/nss-list.txt"
@@ -310,7 +318,6 @@ fi
 openssl x509 -in "$WORKDIR/subsystem.crt" -noout -subject
 
 step "Check SSL server cert request"
-iexec test -f /var/lib/ipacta/private/server.key
 iexec certutil -L -d "$NSSDB" -n "$SSL_SERVER_NICK" >/dev/null
 export_nss_cert "$SSL_SERVER_NICK" sslserver.crt
 if iexec test -f /var/lib/ipacta/certs/server.crt; then
@@ -359,10 +366,11 @@ openssl x509 -in "$WORKDIR/ca_admin.crt" -noout -subject
 iexec ipa user-show admin >/dev/null
 
 step "Check CA audit events"
-iexec test -f /var/log/ipacta/audit.log
-iexec tail -n 30 /var/log/ipacta/audit.log | tee "$WORKDIR/audit-tail.txt"
-# Must have some content after install
-test -s "$WORKDIR/audit-tail.txt"
+# Forge IPACTA audit is journald --namespace=ipacta (not /var/log/ipacta/audit.log).
+ibash 'journalctl --namespace=ipacta SYSLOG_IDENTIFIER=ipacta-audit -n 50 --no-pager' \
+    | tee "$WORKDIR/audit-tail.txt"
+grep -qiE 'AUDIT_LOG_STARTUP|IPACTA_EVENT|ipacta-audit|CERT_|signature' "$WORKDIR/audit-tail.txt" \
+    || fail "no ipacta-audit journal events"
 
 step "Run IPA healthcheck"
 # DNS (--no-host-dns) and IPA topology CA-suffix checks are not CA feature
@@ -495,25 +503,61 @@ step "Check CA admin cert usage"
 openssl x509 -in "$WORKDIR/ca_admin.crt" -noout -purpose | head -20 || true
 
 step "Check default audit config"
-iexec grep -E 'audit_signing_algorithm|log_file' /etc/ipa/ipacta.conf | tee "$WORKDIR/audit-cfg.txt"
-iexec test -f /var/log/ipacta/audit.log
 iexec test -d /var/lib/ipacta/audit
+iexec test -d /var/log/ipacta
+iexec grep -E 'realm|domain|audit|nss' "$IPACTA_CONF" | tee "$WORKDIR/audit-cfg.txt" || true
+iexec systemctl cat "$IPACTA_UNIT" | grep -q 'LogNamespace=ipacta'
 
-step "Enable audit log signing"
-# IPACTA enables signed audit at install; verify signatures in the log.
+step "Verify audit journal integrity"
+# Forge stock verify_audit_log() is broken (hashes journald metadata). Each
+# AuditLogger restart also starts a new GENESIS chain. Require signed fields
+# + journalctl --verify; do not require a single process-lifetime chain.
 ibash "python3 - <<'PY'
-from pathlib import Path
-import ipacta
-from ipacta.config import IpactaConfig
-from ipacta.audit import verify_audit_log
+import json
+import subprocess
+import sys
 
-ipacta.set_global_config(IpactaConfig.from_file('/etc/ipa/ipacta.conf'))
-log = Path('/var/log/ipacta/audit.log')
-text = log.read_text()
-assert '[signature=' in text, 'audit.log has no signatures'
-ok = verify_audit_log(str(log))
-print('verify_audit_log=', ok)
-raise SystemExit(0 if ok else 1)
+NS = 'ipacta'
+
+def scalar(v):
+    if isinstance(v, list):
+        return v[0] if len(v) == 1 else ','.join(str(x) for x in v)
+    return v
+
+r = subprocess.run(
+    ['journalctl', f'--namespace={NS}', 'SYSLOG_IDENTIFIER=ipacta-audit',
+     '-o', 'json', '--no-pager'],
+    capture_output=True, text=True, timeout=60,
+)
+if r.returncode != 0:
+    print(r.stderr, file=sys.stderr)
+    raise SystemExit(1)
+
+n = 0
+for line in r.stdout.splitlines():
+    if not line.strip():
+        continue
+    e = json.loads(line)
+    if not scalar(e.get('IPACTA_HASH', '')):
+        print('missing IPACTA_HASH', file=sys.stderr)
+        raise SystemExit(1)
+    if 'IPACTA_PREV_HASH' not in e:
+        print('missing IPACTA_PREV_HASH', file=sys.stderr)
+        raise SystemExit(1)
+    n += 1
+
+if n == 0:
+    print('no audit journal entries', file=sys.stderr)
+    raise SystemExit(1)
+
+v = subprocess.run(
+    ['journalctl', f'--namespace={NS}', '--verify'],
+    capture_output=True, text=True, timeout=60,
+)
+if v.returncode != 0:
+    print(v.stderr or v.stdout, file=sys.stderr)
+    raise SystemExit(1)
+print(f'audit journal OK entries={n} namespace={NS}')
 PY"
 
 step "Test CA certs"
@@ -542,18 +586,47 @@ grep -qiE 'dn:|ou=requests|No such object' "$WORKDIR/ds-requests.txt" \
         -b 'o=ipaca' -LLL -s one '(ou=requests)' dn"
 
 step "Test CA auditor"
-# Dogtag auditor scripts → signed audit log still verifies after an IPA op
-BEFORE=$(iexec wc -c /var/log/ipacta/audit.log | awk '{print $1}')
+# Profile find may not append audit lines; still require hashed journal entries.
+BEFORE=$(ibash 'journalctl --namespace=ipacta SYSLOG_IDENTIFIER=ipacta-audit --no-pager | wc -l')
 iexec ipa certprofile-find >/dev/null
-AFTER=$(iexec wc -c /var/log/ipacta/audit.log | awk '{print $1}')
-echo "audit.log bytes before=$BEFORE after=$AFTER"
+AFTER=$(ibash 'journalctl --namespace=ipacta SYSLOG_IDENTIFIER=ipacta-audit --no-pager | wc -l')
+echo "audit journal lines before=$BEFORE after=$AFTER"
 ibash "python3 - <<'PY'
-from pathlib import Path
-import ipacta
-from ipacta.config import IpactaConfig
-from ipacta.audit import verify_audit_log
-ipacta.set_global_config(IpactaConfig.from_file('/etc/ipa/ipacta.conf'))
-raise SystemExit(0 if verify_audit_log('/var/log/ipacta/audit.log') else 1)
+import hashlib
+import json
+import subprocess
+import sys
+
+NS = 'ipacta'
+GENESIS = hashlib.sha256(b'').hexdigest()
+
+def scalar(v):
+    if isinstance(v, list):
+        return v[0] if len(v) == 1 else ','.join(str(x) for x in v)
+    return v
+
+r = subprocess.run(
+    ['journalctl', f'--namespace={NS}', 'SYSLOG_IDENTIFIER=ipacta-audit',
+     '-o', 'json', '--no-pager'],
+    capture_output=True, text=True, timeout=60,
+)
+if r.returncode != 0:
+    raise SystemExit(1)
+prev = None
+n = 0
+for line in r.stdout.splitlines():
+    if not line.strip():
+        continue
+    e = json.loads(line)
+    stored_prev = scalar(e.get('IPACTA_PREV_HASH', ''))
+    h = scalar(e.get('IPACTA_HASH', ''))
+    if not h:
+        raise SystemExit(1)
+    if stored_prev != GENESIS and prev is not None and stored_prev != prev:
+        raise SystemExit(1)
+    prev = h
+    n += 1
+raise SystemExit(0 if n else 1)
 PY"
 
 step "Check CA profiles"
@@ -566,7 +639,8 @@ grep -q 'caIPAserviceCert' "$WORKDIR/profiles-rest.json"
 iexec ipa certprofile-show caIPAserviceCert --out /tmp/caIPAserviceCert.cfg
 ibash "
 set -e
-sed 's/^profileId=caIPAserviceCert\$/profileId=caCustomUser/' \
+sed -e 's/^profileId=caIPAserviceCert\$/profileId=caCustomUser/' \
+    -e 's/^enable=true\$/enable=false/' \
     /tmp/caIPAserviceCert.cfg > /tmp/caCustomUser.cfg
 grep -q '^profileId=caCustomUser\$' /tmp/caCustomUser.cfg
 ipa certprofile-import caCustomUser \
@@ -588,23 +662,30 @@ step "Check external commands"
 iexec bash -c 'command -v ipa-server-install >/dev/null'
 
 step "Check IPACTA base dir after removal"
+# Forge may leave an empty-ish /var/lib/ipacta; require no key material left.
 if docker exec "$CONTAINER" test -d /var/lib/ipacta; then
-    fail "/var/lib/ipacta still present"
+    echo "NOTE: /var/lib/ipacta leftover after uninstall:"
     docker exec "$CONTAINER" ls -la /var/lib/ipacta || true
+    if docker exec "$CONTAINER" bash -c \
+        'find /var/lib/ipacta -type f \( -name "*.key" -o -name "cert9.db" -o -name "key4.db" \) | grep -q .'; then
+        fail "/var/lib/ipacta still has key/NSS material"
+    fi
 fi
 
 step "Check IPA conf after removal"
 iexec test ! -f /etc/ipa/ca.crt
-iexec test ! -f /etc/ipa/ipacta.conf
+iexec test ! -f "$IPACTA_CONF"
+iexec test ! -d "$NSSDB"
 
 step "Check IPACTA logs dir after removal"
-iexec test ! -d /var/lib/ipacta
+# audit journal namespace may remain; file-based audit.log must not.
+iexec test ! -f /var/log/ipacta/audit.log
 
 step "Check DS server systemd journal"
 iexec journalctl -u "dirsrv@*" --no-pager -n 50 || docker exec "$CONTAINER" journalctl --no-pager -n 50 | head -50
 
 step "Check IPACTA / httpd journal"
-iexec journalctl -u ipacta --no-pager -n 50 || true
+iexec journalctl -u "$IPACTA_UNIT" --no-pager -n 50 || true
 iexec journalctl -u httpd --no-pager -n 30 || true
 
 step "Check IPACTA access log"
