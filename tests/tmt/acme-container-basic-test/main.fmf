@@ -1,0 +1,15 @@
+summary: acme-container-basic-test (IPACTA) (IPACTA / acme-container-basic-test)
+description: |
+  IPACTA port of Dogtag TMT acme-container-basic-test / GHA acme-container-basic-test.yml.
+  Single IPA container + packaged forge IPACTA.
+test: ./test.sh
+framework: shell
+require: []
+duration: 180m
+tag:
+    - acme
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/acme-container-basic-test.yml

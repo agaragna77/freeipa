@@ -1,0 +1,15 @@
+summary: ca-container-existing-certs-test (IPACTA) (IPACTA / ca-container-existing-certs-test)
+description: |
+  IPACTA port of Dogtag TMT ca-container-existing-certs-test / GHA ca-container-existing-certs-test.yml.
+  Single IPA container + packaged forge IPACTA.
+test: ./test.sh
+framework: shell
+require: []
+duration: 180m
+tag:
+    - ca
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/ca-container-existing-certs-test.yml

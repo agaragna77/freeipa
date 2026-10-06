@@ -1,0 +1,15 @@
+summary: ca-rsa-test (IPACTA) (IPACTA / ca-rsa-test)
+description: |
+  IPACTA port of Dogtag TMT ca-rsa-test / GHA ca-rsa-test.yml.
+  Single IPA container + packaged forge IPACTA.
+test: ./test.sh
+framework: shell
+require: []
+duration: 90m
+tag:
+    - ca
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/ca-rsa-test.yml

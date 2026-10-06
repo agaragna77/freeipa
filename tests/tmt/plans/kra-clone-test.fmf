@@ -1,0 +1,45 @@
+summary: kra-clone-test — IPACTA
+description: |
+  IPACTA/FreeIPA TMT port of Dogtag tests/tmt/kra-clone-test
+  (GHA kra-clone-test.yml). Guest prepare builds freeipa-ipacta from
+  Fedora 46 packages. See tests/tmt/kra-clone-test/README.md
+discover:
+    how: fmf
+    test:
+        - /tests/tmt/kra-clone-test
+provision:
+    how: local
+prepare:
+    - name: require-docker
+      how: shell
+      script:
+        - |
+          set -euo pipefail
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "==== Installing Docker (moby-engine) ===="
+            dnf install -y moby-engine containerd
+          fi
+          systemctl enable docker 2>/dev/null || true
+          systemctl start docker 2>/dev/null || true
+          docker info >/dev/null
+          echo "==== Docker ready ===="
+    - name: build-ipa-runner
+      how: shell
+      script:
+        - |
+          "${TMT_TREE}/tests/tmt/bin/build-ipa-runner.sh" "${TMT_TREE}"
+execute:
+    how: tmt
+finish:
+    how: shell
+    script:
+      - |
+        docker rm -f ipa client 2>/dev/null || true
+        docker network rm example 2>/dev/null || true
+tag:
+    - kra
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/kra-clone-test.yml

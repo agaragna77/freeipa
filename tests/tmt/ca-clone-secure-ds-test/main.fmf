@@ -1,0 +1,15 @@
+summary: ca-clone-secure-ds-test (IPACTA) (IPACTA / ca-clone-secure-ds-test)
+description: |
+  IPACTA port of Dogtag TMT ca-clone-secure-ds-test / GHA ca-clone-secure-ds-test.yml.
+  Single IPA container + packaged forge IPACTA.
+test: ./test.sh
+framework: shell
+require: []
+duration: 180m
+tag:
+    - ca
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/ca-clone-secure-ds-test.yml

@@ -1,0 +1,15 @@
+summary: ca-publishing-user-cert-test (IPACTA) (IPACTA / ca-publishing-user-cert-test)
+description: |
+  IPACTA port of Dogtag TMT ca-publishing-user-cert-test / GHA ca-publishing-user-cert-test.yml.
+  Single IPA container + packaged forge IPACTA.
+test: ./test.sh
+framework: shell
+require: []
+duration: 90m
+tag:
+    - ca
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/ca-publishing-user-cert-test.yml

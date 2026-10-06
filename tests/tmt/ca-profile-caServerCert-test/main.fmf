@@ -1,0 +1,15 @@
+summary: ca-profile-caServerCert-test (IPACTA) (IPACTA / ca-profile-caServerCert-test)
+description: |
+  IPACTA port of Dogtag TMT ca-profile-caServerCert-test / GHA ca-profile-caServerCert-test.yml.
+  Single IPA container + packaged forge IPACTA.
+test: ./test.sh
+framework: shell
+require: []
+duration: 90m
+tag:
+    - ca
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/ca-profile-caServerCert-test.yml

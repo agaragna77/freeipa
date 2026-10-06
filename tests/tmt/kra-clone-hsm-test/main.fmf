@@ -1,0 +1,15 @@
+summary: kra-clone-hsm-test (IPACTA) (IPACTA / kra-clone-hsm-test)
+description: |
+  IPACTA port of Dogtag TMT kra-clone-hsm-test / GHA kra-clone-hsm-test.yml.
+  Single IPA container + packaged forge IPACTA.
+test: ./test.sh
+framework: shell
+require: []
+duration: 180m
+tag:
+    - kra
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/kra-clone-hsm-test.yml

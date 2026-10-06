@@ -1,0 +1,15 @@
+summary: kra-external-certs-test (IPACTA) (IPACTA / kra-external-certs-test)
+description: |
+  IPACTA port of Dogtag TMT kra-external-certs-test / GHA kra-external-certs-test.yml.
+  Single IPA container + packaged forge IPACTA.
+test: ./test.sh
+framework: shell
+require: []
+duration: 90m
+tag:
+    - kra
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/kra-external-certs-test.yml

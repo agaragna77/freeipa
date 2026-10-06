@@ -1,0 +1,15 @@
+summary: kra-kryoptic-test (IPACTA) (IPACTA / kra-kryoptic-test)
+description: |
+  IPACTA port of Dogtag TMT kra-kryoptic-test / GHA kra-kryoptic-test.yml.
+  Single IPA container + packaged forge IPACTA.
+test: ./test.sh
+framework: shell
+require: []
+duration: 90m
+tag:
+    - kra
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/kra-kryoptic-test.yml

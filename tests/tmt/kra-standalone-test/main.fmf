@@ -1,0 +1,15 @@
+summary: kra-standalone-test (IPACTA) (IPACTA / kra-standalone-test)
+description: |
+  IPACTA port of Dogtag TMT kra-standalone-test / GHA kra-standalone-test.yml.
+  Single IPA container + packaged forge IPACTA.
+test: ./test.sh
+framework: shell
+require: []
+duration: 90m
+tag:
+    - kra
+    - ipacta
+    - idm-8254
+link:
+    - verifies: https://redhat.atlassian.net/browse/IDM-8254
+    - relates: https://github.com/dogtagpki/pki/blob/master/.github/workflows/kra-standalone-test.yml
