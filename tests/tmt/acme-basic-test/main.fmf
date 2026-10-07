@@ -1,7 +1,8 @@
-summary: acme-basic-test (IPACTA) (IPACTA / acme-basic-test)
+summary: acme-basic-test (IPACTA hand-port)
 description: |
-  IPACTA port of Dogtag TMT acme-basic-test / GHA acme-basic-test.yml.
-  Single IPA container + packaged forge IPACTA.
+  Hand-ported IPACTA/FreeIPA ACME basic test (Dogtag GHA acme-basic-test.yml).
+  ipa-acme-manage + certbot against https://ipa-ca.$DOMAIN/acme/directory.
+  See tests/tmt/acme-basic-test/README.md
 test: ./test.sh
 framework: shell
 require: []

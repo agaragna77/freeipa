@@ -1,8 +1,8 @@
-summary: acme-basic-test — IPACTA
+summary: acme-basic-test — IPACTA (hand-port)
 description: |
-  IPACTA/FreeIPA TMT port of Dogtag tests/tmt/acme-basic-test
-  (GHA acme-basic-test.yml). Guest prepare builds freeipa-ipacta from
-  Fedora 46 packages. See tests/tmt/acme-basic-test/README.md
+  Hand-ported IPACTA/FreeIPA ACME basic (Dogtag GHA acme-basic-test.yml).
+  Guest prepare builds freeipa-ipacta from Fedora 46 packages.
+  See tests/tmt/acme-basic-test/README.md
 discover:
     how: fmf
     test:
